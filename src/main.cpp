@@ -55,6 +55,29 @@ int main() {
           double steer_value;
           double throttle_value;
 
+          // transform simulator points to vehicle coordinates
+          Eigen::VectorXd trans_ptsx(ptsx.size());
+          Eigen::VectorXd trans_ptsy(ptsy.size());
+          for (unsigned int i = 0; i < ptsx.size(); i++) {
+            double dx = ptsx[i]-px;
+            double dy = ptsy[i]-py;
+            trans_ptsx[i] = dx*cos(psi) + dy*sin(psi);
+            trans_ptsy[i] = -dx*sin(psi) + dy*cos(psi);
+          }
+          // fit 3rd degree polynomial to vehicle points
+          auto coeffs = polyfit(trans_ptsx, trans_ptsy, 3);
+
+          // calculate cte and epsi
+          double cte = polyeval(coeffs, 0);
+          double epsi = -atan(coeffs[1]);
+          // solve MPC
+          Eigen::VectorXd state(6);
+          state << 0, 0, 0, v, cte, epsi;
+          auto sol = mpc.Solve(state, coeffs);
+          // extract steering angle and throttle form MPC results
+          steer_value = sol[0] / deg2rad(25);
+          throttle_value = sol[1];
+
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the 
           //   steering value back. Otherwise the values will be in between 
@@ -72,6 +95,11 @@ int main() {
            *   connected by a Green line
            */
 
+          for (unsigned int i = 2; i < sol.size(); i += 2) {
+            mpc_x_vals.push_back(sol[i]);
+            mpc_y_vals.push_back(sol[i+1]);
+          }
+
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
@@ -84,6 +112,11 @@ int main() {
            *   the vehicle's coordinate system the points in the simulator are 
            *   connected by a Yellow line
            */
+
+          for (unsigned int i = 0; i < 20; i++) {
+            next_x_vals.push_back(i*5); // trans_ptsx[i]
+            next_y_vals.push_back(polyeval(coeffs, i*5)); // trans_ptsy[i]
+          }
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
